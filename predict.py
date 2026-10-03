@@ -40,12 +40,13 @@ class Predictor:
         X = row[self.features]
         proba = self.clf.predict_proba(X)
         condition = str(self.clf.predict(X)[0])
+        risk = round(float(risk_score(proba, self.clf.classes_)[0]), 1)
         return {
             "condition": condition,
-            "risk_percent": round(float(risk_score(proba, self.clf.classes_)[0]), 1),
+            "risk_percent": risk,
             "hours_left": round(float(np.clip(self.rul.predict(X)[0], 0, 200)), 0),   # 200 = no failure expected soon
             "anomaly": bool(self.iso.predict(X)[0] == -1),
-            "reasons": self._reasons(row) if condition != "Normal" else [],   # only explain Warning/Critical
+            "reasons": self._reasons(row) if (condition != "Normal" or risk >= 25) else [],   # only explain Warning/Critical
             "probabilities": {c: round(float(p), 3) for c, p in zip(self.clf.classes_, proba[0])},
         }
 
