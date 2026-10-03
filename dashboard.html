@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Predictive Maintenance Dashboard</title>
+<style>
+:root{--bg:#f1f5f9;--card:#fff;--tx:#0f172a;--mu:#64748b;--ln:#e2e8f0}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:#0f172a;color:#fff;padding:12px 20px;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}h2{font-size:18px;margin:0}h2 small{font-size:13px;color:var(--mu);font-weight:400}
+.sum{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pill{padding:4px 12px;border-radius:99px;font-size:13px;font-weight:600;color:#fff}
+.hl{font-size:13px;display:flex;gap:14px;align-items:center}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+nav{display:flex;gap:4px;padding:10px 20px 0}
+nav button{border:0;background:none;padding:8px 14px;font-size:14px;cursor:pointer;color:var(--mu);border-bottom:2px solid transparent}
+nav button.on{color:var(--tx);border-color:#0d9488;font-weight:600}
+main{padding:16px 20px}
+.main{display:grid;gap:16px}.main.has{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+@media(max-width:900px){.main.has{grid-template-columns:1fr}}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;align-content:start}
+.card,.panel,.item,table{background:var(--card);border:1px solid var(--ln);border-radius:10px}
+.card{padding:12px;cursor:pointer;border-top:4px solid var(--c)}
+.card.sel{outline:2px solid #0d9488}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.mu{color:var(--mu);font-size:13px}.big{font-size:26px;font-weight:700}
+.bar{height:8px;background:var(--ln);border-radius:9px;overflow:hidden;margin:6px 0}
+.bar i{display:block;height:100%}
+.badge{color:#fff;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700}
+.tag{font-size:11px;font-weight:700;color:#7c3aed;background:#ede9fe;padding:2px 8px;border-radius:99px}
+.panel{padding:16px;display:flex;flex-direction:column;gap:12px;align-self:start}
+.action{border-left:4px solid;padding:8px 12px;background:#f8fafc;border-radius:6px;font-size:14px}
+ul{margin:0;padding-left:18px;font-size:14px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.chart{background:#f8fafc;border-radius:8px;padding:8px}
+.chart svg{width:100%;height:60px;display:block}
+.cl{display:flex;justify-content:space-between;font-size:12px;color:var(--mu)}.cl b{color:var(--tx)}
+.ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--ln);padding-top:12px}
+button.b,select{padding:7px 12px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;font-size:13px;cursor:pointer}
+button.b.p{background:#0d9488;color:#fff;border-color:#0d9488}button.b.d{background:#dc2626;color:#fff;border-color:#dc2626}
+button.b:disabled{opacity:.5;cursor:default}
+button.x{border:0;background:none;font-size:18px;cursor:pointer;color:var(--mu)}
+.list{display:flex;flex-direction:column;gap:8px;max-width:800px}
+.item{padding:10px 14px;border-left:5px solid var(--c);display:flex;gap:12px;justify-content:space-between;align-items:center}
+table{border-collapse:collapse;width:100%;max-width:900px;overflow:hidden}
+th,td{text-align:left;padding:8px 12px;font-size:13px;border-bottom:1px solid var(--ln)}th{background:#f8fafc}
+.warn{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:14px}
+.toast{position:fixed;right:16px;bottom:16px;background:#0f172a;color:#fff;padding:12px 16px;border-radius:10px;max-width:340px;border-left:5px solid var(--c);font-size:14px;box-shadow:0 6px 20px #0004}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+// Backend address. For a phone/other PC open this page as dashboard.html?api=http://<laptop-ip>:8000
+const API = new URLSearchParams(location.search).get("api") || "http://localhost:8000";
+const COLORS = { Normal: "#16a34a", Warning: "#d97706", Critical: "#dc2626" };
+const ACTION = {
+  Normal: "Operating normally. No action needed.",
+  Warning: "Schedule an inspection within 24 hours.",
+  Critical: "Stop the machine and service it now.",
+};
+const api = (path, method = "GET") =>
+  fetch(API + path, { method }).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+
+const Badge = ({ s }) => <span className="badge" style={{ background: COLORS[s] }}>{s}</span>;
+
+function Chart({ data, color, label, unit, d = 1 }) {
+  const w = 300, h = 60;
+  if (!data || data.length < 2) return <div className="chart"><div className="cl"><span>{label}</span></div></div>;
+  const mn = Math.min(...data), mx = Math.max(...data), rg = (mx - mn) || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - 5 - ((v - mn) / rg) * (h - 10)}`).join(" ");
+  return (
+    <div className="chart">
+      <div className="cl"><span>{label}</span><b>{data[data.length - 1].toFixed(d)} {unit}</b></div>
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </div>
+  );
+}
+
+function Card({ m, risks, selected, onClick }) {
+  const c = COLORS[m.status];
+  return (
+    <div className={"card" + (selected ? " sel" : "")} style={{ "--c": c }} onClick={onClick}>
+      <div className="row"><b>{m.machine_id}</b><Badge s={m.status} /></div>
+      <div className="mu">{m.machine_type}</div>
+      <div className="big" style={{ color: c }}>{m.risk_percent.toFixed(0)}%</div>
+      <div className="bar"><i style={{ width: Math.min(100, m.risk_percent) + "%", background: c }} /></div>
+      <div className="mu">{m.failed ? "FAILED" : m.hours_left >= 200 ? "No failure expected" : `~${m.hours_left} h left`}</div>
+      <div className="row" style={{ marginTop: 6 }}>
+        {m.anomaly ? <span className="tag">Abnormal readings</span> : <span />}
+        {m.fast_forwarding && <span className="tag">Fast-forward</span>}
+      </div>
+      <Chart data={risks} color={c} label="Risk trend" unit="%" d={0} />
+    </div>
+  );
+}
+
+function Detail({ d, act, close, showCtl }) {
+  const [sc, setSc] = useState("degrading");
+  const c = COLORS[d.status], H = d.history || [], col = k => H.map(p => p[k]);
+  return (
+    <div className="panel">
+      <div className="row"><h2>{d.machine_id} <small>{d.machine_type}</small></h2><button className="x" onClick={close}>✕</button></div>
+      <div className="row"><Badge s={d.status} /><b>Risk {d.risk_percent.toFixed(0)}%</b>
+        <span className="mu">{d.hours_left >= 200 ? "No failure expected soon" : `About ${d.hours_left} h left`}</span></div>
+      <div className="action" style={{ borderColor: c }}>
+        {d.failed ? "Machine has failed. Service required." : ACTION[d.status]}{d.anomaly ? " Readings look abnormal." : ""}
+      </div>
+      {d.reasons.length > 0 && <ul>{d.reasons.map(r => <li key={r}>{r}</li>)}</ul>}
+      <div className="charts">
+        <Chart data={col("risk_percent")} color={c} label="Risk" unit="%" d={0} />
+        <Chart data={col("temperature")} color="#ea580c" label="Temperature" unit="°C" />
+        <Chart data={col("vibration")} color="#7c3aed" label="Vibration" unit="mm/s" d={2} />
+        <Chart data={col("motor_current")} color="#2563eb" label="Motor current" unit="A" d={2} />
+        <Chart data={col("rpm")} color="#0d9488" label="Speed" unit="rpm" d={0} />
+        <div className="chart"><div className="cl"><span>Workload</span><b>{d.readings.workload.toFixed(0)} %</b></div>
+          <div className="cl" style={{ marginTop: 8 }}><span>Operating hours</span><b>{d.readings.operating_hours.toFixed(0)} h</b></div></div>
+      </div>
+      {showCtl && (
+        <div className="ctl">
+          <select value={sc} onChange={e => setSc(e.target.value)}>
+            <option value="healthy">Normal</option><option value="degrading">Gradual degradation</option><option value="near_failure">Near failure</option>
+          </select>
+          <button className="b" onClick={() => act(`/machines/${d.machine_id}/scenario/${sc}`)}>Apply scenario</button>
+          <button className="b d" disabled={d.fast_forwarding || d.failed} onClick={() => act(`/machines/${d.machine_id}/fast-forward?target=Critical`)}>Fast-forward to Critical</button>
+          <button className="b p" onClick={() => act(`/machines/${d.machine_id}/service`)}>Mark as serviced</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [machines, setM] = useState([]), [alerts, setA] = useState([]), [maint, setMt] = useState([]);
+  const [sel, setSel] = useState(null), [detail, setD] = useState(null), [tab, setTab] = useState("overview");
+  const [online, setOn] = useState(false), [toast, setToast] = useState(null), [showCtl, setCtl] = useState(true);
+  const seen = useRef(null), hist = useRef({});
+
+  useEffect(() => {
+    let on = true;
+    const load = async () => {
+      try {
+        const [m, a, mt] = await Promise.all([api("/machines"), api("/alerts"), api("/maintenance")]);
+        if (!on) return;
+        m.forEach(x => { hist.current[x.machine_id] = (hist.current[x.machine_id] || []).concat(x.risk_percent).slice(-60); });
+        const top = a.length ? a[0].id : 0;
+        if (seen.current !== null && top > seen.current) setToast(a[0]);
+        seen.current = top;
+        setOn(true); setM(m); setA(a); setMt(mt);
+      } catch (e) { if (on) setOn(false); }
+    };
+    load();
+    const id = setInterval(load, 1500);
+    return () => { on = false; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    if (!sel) { setD(null); return; }
+    let on = true;
+    const l = () => api("/machines/" + sel).then(x => on && setD(x)).catch(() => {});
+    l();
+    const id = setInterval(l, 1500);
+    return () => { on = false; clearInterval(id); };
+  }, [sel]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const act = p => api(p, "POST")
+    .then(() => sel && api("/machines/" + sel).then(setD))
+    .catch(e => alert("Action failed: " + e.message));
+  const ack = id => api(`/alerts/${id}/ack`, "POST").catch(() => {});
+  const count = s => machines.filter(m => m.status === s).length;
+  const openAlerts = alerts.filter(a => !a.resolved).length;
+  const sorted = [...machines].sort((a, b) => b.risk_percent - a.risk_percent);
+
+  return (
+    <div>
+      <header>
+        <h1>Predictive Maintenance Dashboard</h1>
+        <div className="sum">
+          {["Normal", "Warning", "Critical"].map(s => <span key={s} className="pill" style={{ background: COLORS[s] }}>{count(s)} {s}</span>)}
+          <span className="pill" style={{ background: "#475569" }}>{openAlerts} open alerts</span>
+        </div>
+        <div className="hl">
+          <label><input type="checkbox" checked={showCtl} onChange={e => setCtl(e.target.checked)} /> Demo controls</label>
+          <span><span className="dot" style={{ background: online ? "#22c55e" : "#ef4444" }} />{online ? "Live" : "Offline"}</span>
+        </div>
+      </header>
+      <nav>
+        {[["overview", "Overview"], ["alerts", "Alerts (" + openAlerts + ")"], ["maintenance", "Maintenance history"]].map(([k, l]) =>
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
+      </nav>
+      <main>
+        {!online && <div className="warn">Cannot reach the backend at {API}. Start it with: <code>uvicorn live_api:app --port 8000</code></div>}
+        {tab === "overview" && (
+          <div className={"main" + (sel ? " has" : "")}>
+            <div className="grid">
+              {sorted.map(m => <Card key={m.machine_id} m={m} risks={hist.current[m.machine_id]}
+                selected={sel === m.machine_id} onClick={() => setSel(sel === m.machine_id ? null : m.machine_id)} />)}
+            </div>
+            {sel && detail && <Detail d={detail} act={act} close={() => setSel(null)} showCtl={showCtl} />}
+          </div>
+        )}
+        {tab === "alerts" && (
+          <div className="list">
+            {alerts.length === 0 && <div className="mu">No alerts yet. Fast-forward a machine to see one.</div>}
+            {alerts.map(a => (
+              <div key={a.id} className="item" style={{ "--c": COLORS[a.level], opacity: a.resolved ? 0.55 : 1 }}>
+                <div><div><Badge s={a.level} /> <b>{a.machine_id}</b> <span className="mu">{new Date(a.created_at).toLocaleTimeString()}</span></div>
+                  <div style={{ marginTop: 4, fontSize: 14 }}>{a.message}</div></div>
+                {a.resolved ? <span className="mu">Resolved</span>
+                  : a.acknowledged ? <span className="mu">Acknowledged</span>
+                  : <button className="b" onClick={() => ack(a.id)}>Acknowledge</button>}
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "maintenance" && (
+          maint.length === 0 ? <div className="mu">No maintenance yet. Use "Mark as serviced" on a machine.</div> :
+          <table>
+            <thead><tr><th>Time</th><th>Machine</th><th>Action</th><th>Status before</th><th>Risk before</th><th>Operating hours</th></tr></thead>
+            <tbody>{maint.map((r, i) => (
+              <tr key={i}><td>{new Date(r.created_at).toLocaleTimeString()}</td><td>{r.machine_id}</td><td>{r.action}</td>
+                <td><Badge s={r.status_before} /></td><td>{r.risk_before.toFixed(0)}%</td><td>{r.operating_hours.toFixed(0)}</td></tr>))}
+            </tbody>
+          </table>
+        )}
+      </main>
+      {toast && <div className="toast" style={{ "--c": COLORS[toast.level] }}><b>New alert:</b> {toast.message}</div>}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
